@@ -1,0 +1,5 @@
+# System-level packages for Streamlit Cloud
+# These are APT packages that will be installed before Python packages
+# Currently empty - add if needed, for example:
+# libssl-dev
+# libcurl4-openssl-dev
