@@ -7,16 +7,17 @@ from typing import Dict, List, Tuple
 import hashlib
 import base64
 from io import BytesIO
+import os
 
 # Page configuration
 st.set_page_config(
     page_title="Advanced Prompt Engineering Tool",
-    page_icon="??",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for better styling (removed problematic emojis)
 st.markdown("""
 <style>
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
@@ -34,10 +35,25 @@ st.markdown("""
         padding: 15px;
         margin: 10px 0;
     }
-    .highlight {
-        background-color: #ffd700;
-        padding: 2px 5px;
-        border-radius: 3px;
+    .technique-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    .copy-button {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -51,124 +67,320 @@ if 'optimized_prompts' not in st.session_state:
     st.session_state.optimized_prompts = {}
 if 'saved_templates' not in st.session_state:
     st.session_state.saved_templates = []
+if 'api_keys' not in st.session_state:
+    st.session_state.api_keys = {}
+if 'applied_techniques' not in st.session_state:
+    st.session_state.applied_techniques = []
 
-# Model configurations
+# Load API keys from Streamlit secrets (if available)
+def load_api_keys():
+    """Load API keys from Streamlit secrets or environment variables"""
+    api_keys = {}
+    
+    # Try to load from Streamlit secrets first
+    if hasattr(st, 'secrets'):
+        try:
+            if 'api_keys' in st.secrets:
+                api_keys['openai'] = st.secrets.api_keys.get('OPENAI_API_KEY', '')
+                api_keys['anthropic'] = st.secrets.api_keys.get('ANTHROPIC_API_KEY', '')
+                api_keys['google'] = st.secrets.api_keys.get('GOOGLE_API_KEY', '')
+        except:
+            pass
+    
+    # Fallback to environment variables
+    if not api_keys.get('openai'):
+        api_keys['openai'] = os.getenv('OPENAI_API_KEY', '')
+    if not api_keys.get('anthropic'):
+        api_keys['anthropic'] = os.getenv('ANTHROPIC_API_KEY', '')
+    if not api_keys.get('google'):
+        api_keys['google'] = os.getenv('GOOGLE_API_KEY', '')
+    
+    return api_keys
+
+# Load API keys on startup
+st.session_state.api_keys = load_api_keys()
+
+# REAL Prompt Engineering Techniques based on best practices
+PROMPT_TECHNIQUES = {
+    "Claude Best Practices": {
+        "xml_tags": {
+            "name": "XML Tag Structure",
+            "description": "Use XML tags for clear structure and parsing",
+            "example": "Transform prompt into XML-tagged sections for clarity",
+            "apply": lambda p: f"""<task>
+{p}
+</task>
+
+<instructions>
+Please provide a comprehensive response following these guidelines:
+- Be specific and detailed in your answer
+- Use structured formatting where appropriate
+- Include examples when helpful
+</instructions>"""
+        },
+        "thinking_tags": {
+            "name": "Chain of Thought with Thinking Tags",
+            "description": "Add thinking tags for complex reasoning",
+            "example": "Encourages step-by-step reasoning",
+            "apply": lambda p: f"""<task>
+{p}
+</task>
+
+<thinking_process>
+Before answering, please:
+1. Break down the key components of this request
+2. Consider multiple approaches
+3. Identify potential challenges or edge cases
+4. Formulate a comprehensive response
+</thinking_process>
+
+Please think through this step-by-step and provide your reasoning."""
+        },
+        "role_definition": {
+            "name": "Clear Role Definition",
+            "description": "Define a specific expert role",
+            "example": "You are an expert in [domain]...",
+            "apply": lambda p: f"""You are an expert assistant with deep knowledge across multiple domains. Your role is to provide accurate, helpful, and well-structured responses.
+
+<task>
+{p}
+</task>
+
+Approach this task with expertise and attention to detail."""
+        },
+        "prefill_technique": {
+            "name": "Assistant Prefilling",
+            "description": "Start the assistant's response to guide format",
+            "example": "Begin response with structure",
+            "apply": lambda p: f"""{p}
+
+Please structure your response as follows:
+1. **Overview**: Brief summary of the approach
+2. **Detailed Analysis**: Step-by-step breakdown
+3. **Key Insights**: Important points to consider
+4. **Recommendations**: Actionable next steps
+
+Let me help you with this:"""
+        }
+    },
+    "OpenAI Best Practices": {
+        "system_message": {
+            "name": "System Message Optimization",
+            "description": "Clear system-level instructions",
+            "example": "Separate system context from user prompt",
+            "apply": lambda p: f"""System: You are a helpful, accurate, and creative AI assistant. Follow these principles:
+- Provide detailed, well-structured responses
+- Use examples to illustrate complex points
+- Admit uncertainty when appropriate
+- Focus on being helpful and constructive
+
+User request:
+{p}"""
+        },
+        "few_shot": {
+            "name": "Few-Shot Examples",
+            "description": "Provide examples of desired output",
+            "example": "Show 2-3 examples of good responses",
+            "apply": lambda p: f"""Here are examples of the type of response I'm looking for:
+
+Example 1:
+Input: [Similar task]
+Output: [Detailed, well-structured response]
+
+Example 2:
+Input: [Another similar task]
+Output: [Another detailed response]
+
+Now, for my actual request:
+{p}
+
+Please follow the same detailed, structured approach as shown in the examples."""
+        },
+        "json_mode": {
+            "name": "Structured Output Format",
+            "description": "Request specific output format",
+            "example": "Specify JSON or markdown structure",
+            "apply": lambda p: f"""{p}
+
+Please provide your response in the following structured format:
+```
+### Main Points
+- Point 1: [Details]
+- Point 2: [Details]
+
+### Analysis
+[Your detailed analysis]
+
+### Conclusion
+[Summary and recommendations]
+```"""
+        },
+        "temperature_guidance": {
+            "name": "Temperature and Parameter Hints",
+            "description": "Suggest optimal parameters",
+            "example": "Indicate if creative or factual response needed",
+            "apply": lambda p: f"""[This task requires balanced creativity and accuracy]
+
+{p}
+
+Note: Please provide a response that balances factual accuracy with creative insights."""
+        }
+    },
+    "Universal Techniques": {
+        "chain_of_thought": {
+            "name": "Chain of Thought (CoT)",
+            "description": "Add 'think step by step' instruction",
+            "example": "Let's approach this step-by-step",
+            "apply": lambda p: f"""{p}
+
+Let's think through this step-by-step:
+1. First, identify the key components
+2. Then, analyze each part carefully
+3. Finally, synthesize a comprehensive response
+
+Please show your reasoning process."""
+        },
+        "task_decomposition": {
+            "name": "Task Decomposition",
+            "description": "Break complex tasks into subtasks",
+            "example": "Divide into manageable components",
+            "apply": lambda p: f"""This is a complex request that we'll break down into parts:
+
+Main Task: {p}
+
+Let's address this by:
+Part A: [First component]
+Part B: [Second component]
+Part C: [Third component]
+
+Please address each part thoroughly and then provide an integrated conclusion."""
+        },
+        "constraints_and_requirements": {
+            "name": "Clear Constraints",
+            "description": "Specify limitations and requirements",
+            "example": "Must/must not instructions",
+            "apply": lambda p: f"""{p}
+
+Requirements:
+- Be comprehensive but concise
+- Use specific examples
+- Cite sources when making claims
+- Structure the response clearly
+- Focus on practical applications
+
+Constraints:
+- Avoid jargon without explanation
+- Keep response focused on the query
+- Ensure accuracy over speculation"""
+        },
+        "self_consistency": {
+            "name": "Self-Consistency Check",
+            "description": "Request verification of response",
+            "example": "Double-check accuracy",
+            "apply": lambda p: f"""{p}
+
+After providing your response, please:
+1. Verify the accuracy of any facts or figures
+2. Ensure logical consistency throughout
+3. Check that all parts of the question are addressed
+4. Confirm the response is helpful and actionable"""
+        },
+        "role_play_expert": {
+            "name": "Expert Role-Playing",
+            "description": "Assume specific expert persona",
+            "example": "Act as domain expert",
+            "apply": lambda p: f"""You are a world-class expert in the relevant field for this query. Drawing on your extensive knowledge and experience:
+
+{p}
+
+Please provide an expert-level response that demonstrates deep understanding and practical insights."""
+        },
+        "emotional_appeal": {
+            "name": "Motivation Enhancement",
+            "description": "Add importance/urgency to prompt",
+            "example": "This is important for my project",
+            "apply": lambda p: f"""{p}
+
+This is a critical task that requires your best analysis. Please provide a thorough, thoughtful response that addresses all aspects of the query. Your insights will be valuable for important decision-making."""
+        }
+    },
+    "Advanced Techniques": {
+        "tree_of_thoughts": {
+            "name": "Tree of Thoughts (ToT)",
+            "description": "Explore multiple solution paths",
+            "example": "Consider alternative approaches",
+            "apply": lambda p: f"""{p}
+
+Please approach this by:
+1. Considering multiple possible solutions or interpretations
+2. Evaluating the pros and cons of each approach
+3. Selecting the most promising path(s)
+4. Providing a detailed exploration of the best option(s)
+
+Show your thought process for each alternative considered."""
+        },
+        "react_pattern": {
+            "name": "ReAct (Reasoning + Acting)",
+            "description": "Combine reasoning with action steps",
+            "example": "Think, then act, then observe",
+            "apply": lambda p: f"""{p}
+
+Use the following approach:
+Thought: What do I need to understand first?
+Action: What information or analysis is needed?
+Observation: What insights does this provide?
+Thought: Based on this, what's next?
+[Continue until complete]
+
+Please show this reasoning-action cycle in your response."""
+        },
+        "meta_prompting": {
+            "name": "Meta-Prompting",
+            "description": "Prompt about how to approach the prompt",
+            "example": "First improve the question itself",
+            "apply": lambda p: f"""Before answering, let's first ensure we're addressing the right question:
+
+Original request: {p}
+
+Please:
+1. Identify any ambiguities or assumptions in the request
+2. Clarify what would make the most helpful response
+3. Then provide a comprehensive answer to the refined question"""
+        },
+        "analogical_reasoning": {
+            "name": "Analogical Reasoning",
+            "description": "Use analogies and comparisons",
+            "example": "Relate to familiar concepts",
+            "apply": lambda p: f"""{p}
+
+In your response:
+1. Draw analogies to similar, well-understood concepts
+2. Use comparative analysis where helpful
+3. Provide concrete examples and metaphors
+4. Connect abstract ideas to practical applications"""
+        }
+    }
+}
+
+# Model configurations with best practices
 MODELS = {
     "Anthropic": {
-        "models": ["Claude 4 Opus", "Claude 4 Sonnet", "Claude 3.5 Sonnet", "Claude 3 Haiku"],
+        "models": ["Claude 3 Opus", "Claude 3 Sonnet", "Claude 3.5 Sonnet", "Claude 3 Haiku"],
         "max_tokens": 200000,
-        "pricing": {"input": 0.015, "output": 0.075},  # per 1K tokens
-        "strengths": ["Complex reasoning", "Creative writing", "Code generation", "Long context"],
-        "formatting_tips": [
-            "Use XML tags for structure",
-            "Provide clear role definitions",
-            "Use step-by-step instructions",
-            "Include examples when possible"
-        ]
+        "best_techniques": ["xml_tags", "thinking_tags", "role_definition", "prefill_technique", "chain_of_thought"],
+        "pricing": {"input": 0.015, "output": 0.075}
     },
     "OpenAI": {
         "models": ["GPT-4 Turbo", "GPT-4", "GPT-3.5 Turbo"],
         "max_tokens": 128000,
-        "pricing": {"input": 0.01, "output": 0.03},
-        "strengths": ["General knowledge", "Function calling", "JSON mode", "Vision capabilities"],
-        "formatting_tips": [
-            "Use system messages effectively",
-            "Specify output format clearly",
-            "Use temperature for creativity control",
-            "Leverage function calling for structured outputs"
-        ]
+        "best_techniques": ["system_message", "few_shot", "json_mode", "chain_of_thought", "task_decomposition"],
+        "pricing": {"input": 0.01, "output": 0.03}
     },
     "Google": {
-        "models": ["Gemini 2.5 Pro", "Gemini 2.5 Flash", "Gemini 2.0", "Gemini 1.5 Pro"],
+        "models": ["Gemini 1.5 Pro", "Gemini 1.5 Flash", "Gemini 1.0 Pro"],
         "max_tokens": 2000000,
-        "pricing": {"input": 0.00125, "output": 0.005},
-        "strengths": ["Multimodal understanding", "Long context", "Speed", "Cost efficiency"],
-        "formatting_tips": [
-            "Use clear task descriptions",
-            "Leverage multimodal capabilities",
-            "Provide context upfront",
-            "Use structured prompts for complex tasks"
-        ]
-    }
-}
-
-# Sample prompts library
-SAMPLE_PROMPTS = {
-    "Code Generation": {
-        "description": "Optimized for generating clean, efficient code",
-        "template": """You are an expert software engineer. Your task is to:
-
-1. Understand the requirements completely
-2. Write clean, efficient, and well-documented code
-3. Follow best practices and design patterns
-4. Include error handling and edge cases
-
-Requirements: {requirements}
-
-Please provide:
-- Complete implementation
-- Code comments explaining complex logic
-- Usage examples
-- Time and space complexity analysis where relevant"""
-    },
-    "Data Analysis": {
-        "description": "Structured approach for data analysis tasks",
-        "template": """Analyze the following data with a systematic approach:
-
-Dataset: {dataset_description}
-
-Your analysis should include:
-1. **Data Overview**: Key statistics and patterns
-2. **Insights**: Notable findings and correlations
-3. **Anomalies**: Unusual patterns or outliers
-4. **Recommendations**: Actionable insights based on analysis
-5. **Limitations**: Any constraints or caveats
-
-Use clear visualizations descriptions and quantitative metrics."""
-    },
-    "Creative Writing": {
-        "description": "Enhanced creativity with structure",
-        "template": """Create a compelling {content_type} with these parameters:
-
-Theme: {theme}
-Tone: {tone}
-Target Audience: {audience}
-
-Requirements:
-- Engaging opening that hooks the reader
-- Rich, vivid descriptions
-- Strong character development (if applicable)
-- Clear narrative arc
-- Satisfying conclusion
-
-Additional constraints: {constraints}"""
-    },
-    "Research & Synthesis": {
-        "description": "Comprehensive research and information synthesis",
-        "template": """Conduct thorough research on: {topic}
-
-Provide a comprehensive analysis including:
-
-## Executive Summary
-Brief overview of key findings
-
-## Detailed Analysis
-- Current state of knowledge
-- Key stakeholders and perspectives
-- Recent developments and trends
-- Challenges and opportunities
-
-## Evidence and Sources
-Cite credible sources and data points
-
-## Conclusions
-Synthesize findings into actionable insights
-
-## Future Outlook
-Predictions and recommendations
-
-Depth level: {depth_level}
-Focus areas: {focus_areas}"""
+        "best_techniques": ["chain_of_thought", "task_decomposition", "role_play_expert", "constraints_and_requirements"],
+        "pricing": {"input": 0.00125, "output": 0.005}
     }
 }
 
@@ -195,110 +407,106 @@ def calculate_metrics(text: str) -> Dict:
         "estimated_tokens": estimated_tokens
     }
 
-def optimize_prompt(prompt: str, provider: str, focus_areas: List[str]) -> str:
-    """Optimize prompt based on provider and focus areas"""
+def apply_prompt_engineering_techniques(prompt: str, provider: str, selected_techniques: List[str]) -> Tuple[str, List[str]]:
+    """Apply real prompt engineering techniques based on provider and selection"""
+    
     optimized = prompt
+    applied = []
     
-    # Provider-specific optimizations
-    if provider == "Anthropic":
-        if "Structure" in focus_areas:
-            optimized = f"<task>\n{optimized}\n</task>"
-        if "Clarity" in focus_areas:
-            optimized = re.sub(r'\n{3,}', '\n\n', optimized)
-            optimized = optimized.replace("Please ", "").replace("Could you ", "")
+    # Get provider-specific recommended techniques
+    if provider in MODELS:
+        recommended = MODELS[provider].get("best_techniques", [])
+    else:
+        recommended = ["chain_of_thought", "task_decomposition", "constraints_and_requirements"]
     
-    elif provider == "OpenAI":
-        if "Structure" in focus_areas:
-            optimized = f"### Task\n{optimized}\n\n### Requirements\n- Provide detailed response\n- Use clear formatting"
-        if "JSON Output" in focus_areas:
-            optimized += "\n\nRespond with valid JSON format."
+    # Apply selected techniques
+    for technique_id in selected_techniques:
+        # Find the technique across all categories
+        for category, techniques in PROMPT_TECHNIQUES.items():
+            if technique_id in techniques:
+                technique = techniques[technique_id]
+                optimized = technique["apply"](optimized)
+                applied.append(f"{technique['name']} ({category})")
+                break
     
-    elif provider == "Google":
-        if "Structure" in focus_areas:
-            optimized = f"**Task Description:**\n{optimized}\n\n**Expected Output:**\nProvide comprehensive response with clear sections."
+    # If no techniques selected, apply recommended ones
+    if not selected_techniques and recommended:
+        for technique_id in recommended[:3]:  # Apply top 3 recommended
+            for category, techniques in PROMPT_TECHNIQUES.items():
+                if technique_id in techniques:
+                    technique = techniques[technique_id]
+                    optimized = technique["apply"](optimized)
+                    applied.append(f"{technique['name']} ({category})")
+                    break
     
-    # Universal optimizations
-    if "Specificity" in focus_areas:
-        # Add specificity hints
-        if "explain" in optimized.lower() and "how" not in optimized.lower():
-            optimized = optimized.replace("explain", "explain step-by-step how")
-        if "write" in optimized.lower() and "code" in optimized.lower():
-            optimized += "\nInclude comments and error handling."
-    
-    if "Examples" in focus_areas:
-        optimized += "\n\nProvide specific examples to illustrate your points."
-    
-    if "Constraints" in focus_areas:
-        optimized += "\n\nConstraints: Be concise, focus on practical applications, avoid jargon."
-    
-    return optimized
-
-def generate_prompt_hash(prompt: str) -> str:
-    """Generate a unique hash for a prompt"""
-    return hashlib.md5(prompt.encode()).hexdigest()[:8]
-
-def export_prompt_report(prompt_data: Dict) -> str:
-    """Generate a downloadable report"""
-    report = f"""# Prompt Engineering Report
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-## Original Prompt
-{prompt_data.get('original', '')}
-
-## Metrics
-- Word Count: {prompt_data.get('metrics', {}).get('word_count', 0)}
-- Character Count: {prompt_data.get('metrics', {}).get('char_count', 0)}
-- Clarity Score: {prompt_data.get('metrics', {}).get('clarity_score', 0)}%
-- Estimated Tokens: {prompt_data.get('metrics', {}).get('estimated_tokens', 0)}
-
-## Optimized Versions
-
-"""
-    for provider, optimized in prompt_data.get('optimized', {}).items():
-        report += f"### {provider}\n```\n{optimized}\n```\n\n"
-    
-    return report
+    return optimized, applied
 
 # Main App
 def main():
-    st.title("?? Advanced Prompt Engineering Tool")
-    st.markdown("Optimize your prompts across all major LLM providers with AI-powered suggestions")
+    st.title("🚀 Advanced Prompt Engineering Tool")
+    st.markdown("Transform your prompts using proven techniques from OpenAI, Anthropic, and Google's best practices")
     
     # Sidebar
     with st.sidebar:
-        st.header("?? Configuration")
+        st.header("Configuration")
         
+        # API Key Status
+        with st.expander("API Keys Status", expanded=False):
+            st.markdown("**Configure in `.streamlit/secrets.toml`**")
+            
+            # Check API keys
+            if st.session_state.api_keys.get('openai'):
+                st.success("✓ OpenAI API configured")
+            else:
+                st.warning("✗ OpenAI API not configured")
+            
+            if st.session_state.api_keys.get('anthropic'):
+                st.success("✓ Anthropic API configured")
+            else:
+                st.warning("✗ Anthropic API not configured")
+            
+            if st.session_state.api_keys.get('google'):
+                st.success("✓ Google API configured")
+            else:
+                st.warning("✗ Google API not configured")
+            
+            st.info("API keys enable testing features")
+        
+        st.subheader("Select Providers")
         selected_providers = st.multiselect(
-            "Select Providers",
+            "Target LLM Providers",
             options=list(MODELS.keys()),
-            default=list(MODELS.keys())
+            default=["Anthropic", "OpenAI"],
+            help="Select which LLM providers to optimize for"
         )
         
-        st.subheader("?? Focus Areas")
-        focus_areas = st.multiselect(
-            "Select optimization focus",
-            ["Structure", "Clarity", "Specificity", "Examples", "Constraints", "JSON Output"],
-            default=["Structure", "Clarity"]
-        )
+        st.subheader("Prompt Engineering Techniques")
+        st.markdown("Select techniques to apply:")
         
-        st.subheader("?? Token & Cost Estimator")
-        if selected_providers:
-            st.info("Token estimates and costs will appear after entering a prompt")
+        selected_techniques = []
+        
+        # Display techniques by category
+        for category, techniques in PROMPT_TECHNIQUES.items():
+            st.markdown(f"**{category}**")
+            for tech_id, tech_info in techniques.items():
+                if st.checkbox(tech_info["name"], key=f"tech_{tech_id}", help=tech_info["description"]):
+                    selected_techniques.append(tech_id)
         
         st.divider()
         
-        st.subheader("?? Quick Actions")
-        if st.button("?? Load Sample Prompt"):
-            st.session_state.show_samples = True
+        # Quick presets
+        st.subheader("Quick Presets")
+        if st.button("Apply Best for Reasoning"):
+            selected_techniques = ["chain_of_thought", "thinking_tags", "tree_of_thoughts", "self_consistency"]
         
-        if st.button("?? View History"):
-            st.session_state.show_history = True
+        if st.button("Apply Best for Creative"):
+            selected_techniques = ["role_play_expert", "analogical_reasoning", "few_shot", "emotional_appeal"]
         
-        if st.button("?? Export All"):
-            st.session_state.export_all = True
+        if st.button("Apply Best for Analysis"):
+            selected_techniques = ["task_decomposition", "react_pattern", "meta_prompting", "xml_tags"]
     
     # Main content area with tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["? Optimize", "?? Templates", "?? Analysis", "?? Compare", "?? History"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Optimize", "Templates", "Analysis", "Compare", "History"])
     
     with tab1:
         st.header("Prompt Optimization Workshop")
@@ -310,7 +518,7 @@ def main():
                 "Enter your prompt",
                 value=st.session_state.current_prompt,
                 height=200,
-                placeholder="Type or paste your prompt here...",
+                placeholder="Enter your prompt here... Example: 'Write a blog post about AI'",
                 key="main_prompt_input"
             )
         
@@ -324,92 +532,210 @@ def main():
                 st.metric("Est. Tokens", metrics['estimated_tokens'])
         
         # Optimization button
-        if st.button("?? Optimize Prompt", type="primary", use_container_width=True):
+        if st.button("🎯 Optimize Prompt", type="primary", use_container_width=True):
             if prompt_input:
                 st.session_state.current_prompt = prompt_input
                 
-                # Generate optimized versions
-                with st.spinner("Optimizing for each provider..."):
+                # Generate optimized versions using REAL techniques
+                with st.spinner("Applying advanced prompt engineering techniques..."):
                     optimized_prompts = {}
+                    applied_techniques_dict = {}
+                    
                     for provider in selected_providers:
-                        optimized = optimize_prompt(prompt_input, provider, focus_areas)
+                        optimized, applied = apply_prompt_engineering_techniques(
+                            prompt_input, 
+                            provider, 
+                            selected_techniques
+                        )
                         optimized_prompts[provider] = optimized
+                        applied_techniques_dict[provider] = applied
                     
                     st.session_state.optimized_prompts = optimized_prompts
+                    st.session_state.applied_techniques = applied_techniques_dict
                     
                     # Add to history
                     st.session_state.prompt_history.append({
                         "timestamp": datetime.now(),
                         "original": prompt_input,
                         "optimized": optimized_prompts,
-                        "metrics": metrics,
-                        "focus_areas": focus_areas
+                        "techniques": applied_techniques_dict,
+                        "metrics": metrics
                     })
         
         # Display optimized versions
         if st.session_state.optimized_prompts:
             st.divider()
-            st.subheader("?? Optimized Versions")
+            st.subheader("🎯 Optimized Versions")
+            
+            # Show applied techniques
+            if st.session_state.applied_techniques:
+                with st.expander("Applied Techniques", expanded=True):
+                    for provider, techniques in st.session_state.applied_techniques.items():
+                        st.markdown(f"**{provider}:**")
+                        for tech in techniques:
+                            st.markdown(f"  • {tech}")
             
             for provider, optimized in st.session_state.optimized_prompts.items():
                 with st.expander(f"**{provider}** - Optimized Prompt", expanded=True):
-                    col1, col2 = st.columns([4, 1])
+                    # Display the optimized prompt
+                    st.text_area(
+                        f"Optimized for {provider}",
+                        value=optimized,
+                        height=300,
+                        key=f"opt_{provider}_display",
+                        disabled=True
+                    )
+                    
+                    col1, col2, col3 = st.columns([1, 1, 2])
                     
                     with col1:
-                        st.text_area(
-                            f"Optimized for {provider}",
-                            value=optimized,
-                            height=150,
-                            key=f"opt_{provider}"
-                        )
-                        
-                        # Provider-specific tips
-                        with st.container():
-                            st.markdown("**Optimization Tips Applied:**")
-                            for tip in MODELS[provider]["formatting_tips"][:2]:
-                                st.markdown(f" {tip}")
+                        # Copy button - shows text area for manual copying
+                        if st.button(f"📋 Show for Copy", key=f"copy_btn_{provider}"):
+                            st.session_state[f"show_copy_{provider}"] = True
                     
                     with col2:
-                        st.markdown("**Provider Strengths:**")
-                        for strength in MODELS[provider]["strengths"][:2]:
-                            st.markdown(f"? {strength}")
-                        
-                        # Cost estimation
-                        est_tokens = calculate_metrics(optimized)['estimated_tokens']
-                        est_cost = (est_tokens / 1000) * MODELS[provider]["pricing"]["input"]
+                        # Download button
+                        st.download_button(
+                            label="⬇ Download",
+                            data=optimized,
+                            file_name=f"{provider}_optimized_prompt.txt",
+                            mime="text/plain",
+                            key=f"download_{provider}"
+                        )
+                    
+                    with col3:
+                        # Metrics
+                        opt_metrics = calculate_metrics(optimized)
+                        est_cost = (opt_metrics['estimated_tokens'] / 1000) * MODELS[provider]["pricing"]["input"]
                         st.metric("Est. Cost", f"${est_cost:.4f}")
-                        
-                        if st.button(f"?? Copy", key=f"copy_{provider}"):
-                            st.success(f"Copied {provider} prompt!")
+                    
+                    # Show copyable text area when button clicked
+                    if st.session_state.get(f"show_copy_{provider}", False):
+                        st.info("Select all text below and copy (Ctrl+C / Cmd+C):")
+                        st.code(optimized, language="text")
     
     with tab2:
-        st.header("?? Prompt Templates Library")
+        st.header("📚 Prompt Templates Library")
         
-        # Template categories
-        col1, col2 = st.columns([1, 2])
+        # Pre-built optimized templates
+        templates = {
+            "Technical Documentation": {
+                "description": "Optimized for creating technical docs",
+                "template": """<task>
+Create comprehensive technical documentation for {topic}
+</task>
+
+<requirements>
+- Target audience: {audience_level} developers
+- Documentation type: {doc_type}
+- Include: Code examples, API references, troubleshooting guide
+- Style: Clear, concise, technically accurate
+</requirements>
+
+<structure>
+1. Overview and Purpose
+2. Prerequisites and Setup
+3. Core Concepts
+4. Implementation Guide
+5. API Reference
+6. Examples and Use Cases
+7. Troubleshooting
+8. Best Practices
+</structure>
+
+Please think step-by-step through each section and provide detailed, practical information."""
+            },
+            "Data Analysis": {
+                "description": "Optimized for data analysis tasks",
+                "template": """You are an expert data analyst. 
+
+<task>
+Analyze the following data/scenario: {data_description}
+</task>
+
+<analysis_framework>
+1. Data Overview: Summarize key characteristics
+2. Statistical Analysis: Identify patterns, trends, outliers
+3. Insights: Extract meaningful findings
+4. Visualizations: Suggest appropriate charts/graphs
+5. Recommendations: Provide actionable insights
+</analysis_framework>
+
+<requirements>
+- Use statistical rigor
+- Explain methodology
+- Quantify findings where possible
+- Consider limitations and biases
+- Provide confidence levels for conclusions
+</requirements>
+
+Let's approach this systematically, showing all reasoning."""
+            },
+            "Creative Content": {
+                "description": "Optimized for creative writing",
+                "template": """You are a creative writing expert with deep understanding of narrative techniques.
+
+<task>
+Create {content_type} about {topic}
+</task>
+
+<parameters>
+- Tone: {tone}
+- Style: {style}
+- Length: {length}
+- Target audience: {audience}
+</parameters>
+
+<creative_guidelines>
+1. Hook: Start with compelling opening
+2. Development: Build narrative/argument progressively
+3. Engagement: Use vivid language and sensory details
+4. Structure: Maintain clear flow and pacing
+5. Resolution: Provide satisfying conclusion
+</creative_guidelines>
+
+Please craft something original and engaging, showing your creative process."""
+            },
+            "Problem Solving": {
+                "description": "Optimized for complex problem solving",
+                "template": """<problem>
+{problem_description}
+</problem>
+
+<context>
+{additional_context}
+</context>
+
+Let's solve this using a structured approach:
+
+1. **Problem Analysis**: Break down the core components
+2. **Constraints Identification**: List limitations and requirements
+3. **Solution Exploration**: Consider multiple approaches
+4. **Trade-off Analysis**: Evaluate pros/cons of each
+5. **Recommendation**: Select optimal solution with justification
+6. **Implementation Plan**: Provide step-by-step execution guide
+
+Please think through this methodically, showing your reasoning at each step."""
+            }
+        }
         
-        with col1:
-            selected_template = st.selectbox(
-                "Select Template Category",
-                options=list(SAMPLE_PROMPTS.keys())
-            )
-        
-        with col2:
-            if selected_template:
-                st.info(SAMPLE_PROMPTS[selected_template]["description"])
+        # Template selection
+        selected_template = st.selectbox(
+            "Select Template",
+            options=list(templates.keys())
+        )
         
         if selected_template:
-            st.divider()
+            template_data = templates[selected_template]
+            st.info(template_data["description"])
             
-            # Display template
             st.markdown("### Template Structure")
-            template_text = SAMPLE_PROMPTS[selected_template]["template"]
-            st.code(template_text, language="markdown")
+            st.code(template_data["template"], language="markdown")
             
-            # Template customization
             st.markdown("### Customize Template")
             
-            # Extract variables from template
+            # Extract variables
+            template_text = template_data["template"]
             variables = re.findall(r'\{(\w+)\}', template_text)
             
             if variables:
@@ -419,23 +745,23 @@ def main():
                     with cols[i % len(cols)]:
                         custom_values[var] = st.text_input(
                             f"{var.replace('_', ' ').title()}",
-                            key=f"var_{var}"
+                            key=f"template_var_{var}"
                         )
                 
-                if st.button("Generate Custom Prompt", type="primary"):
+                if st.button("Generate Customized Prompt"):
                     try:
                         custom_prompt = template_text.format(**custom_values)
                         st.session_state.current_prompt = custom_prompt
-                        st.success("Template applied! Go to Optimize tab to continue.")
-                        st.text_area("Generated Prompt", value=custom_prompt, height=200)
+                        st.success("Template applied! Go to Optimize tab to enhance further.")
+                        st.text_area("Generated Prompt", value=custom_prompt, height=300)
                     except KeyError:
                         st.error("Please fill in all template variables")
     
     with tab3:
-        st.header("?? Prompt Analysis Dashboard")
+        st.header("📊 Prompt Analysis Dashboard")
         
         if prompt_input:
-            # Detailed metrics
+            # Advanced analysis
             col1, col2, col3 = st.columns(3)
             
             metrics = calculate_metrics(prompt_input)
@@ -444,235 +770,118 @@ def main():
                 st.markdown("### Structure Analysis")
                 st.metric("Sentences", metrics['sentence_count'])
                 st.metric("Avg Word Length", metrics['avg_word_length'])
+                st.metric("Words per Sentence", round(metrics['word_count'] / max(metrics['sentence_count'], 1), 1))
                 
-                # Check for common issues
-                issues = []
-                if metrics['word_count'] < 10:
-                    issues.append("? Very short prompt")
+                # Improvement suggestions based on analysis
+                suggestions = []
+                if metrics['word_count'] < 20:
+                    suggestions.append("🔍 Add more context and details")
                 if metrics['sentence_count'] < 2:
-                    issues.append("? Consider adding more detail")
-                if metrics['avg_word_length'] > 7:
-                    issues.append("?? Complex vocabulary")
+                    suggestions.append("📝 Break into multiple sentences for clarity")
+                if metrics['avg_word_length'] > 6:
+                    suggestions.append("✂️ Simplify vocabulary for better understanding")
+                if "?" not in prompt_input and "how" not in prompt_input.lower() and "what" not in prompt_input.lower():
+                    suggestions.append("❓ Consider framing as a clear question")
                 
-                if issues:
-                    st.warning("Potential Issues:")
-                    for issue in issues:
-                        st.markdown(issue)
+                if suggestions:
+                    st.markdown("### Improvement Suggestions")
+                    for suggestion in suggestions:
+                        st.info(suggestion)
             
             with col2:
-                st.markdown("### Token & Cost Analysis")
+                st.markdown("### Prompt Engineering Potential")
                 
-                for provider in selected_providers:
+                # Analyze which techniques would be most beneficial
+                recommendations = []
+                
+                if "step" not in prompt_input.lower() and "think" not in prompt_input.lower():
+                    recommendations.append("**Chain of Thought**: Add step-by-step reasoning")
+                
+                if len(prompt_input.split()) > 50:
+                    recommendations.append("**Task Decomposition**: Break into subtasks")
+                
+                if not any(role in prompt_input.lower() for role in ["you are", "act as", "expert"]):
+                    recommendations.append("**Role Definition**: Add expert persona")
+                
+                if "example" not in prompt_input.lower():
+                    recommendations.append("**Few-Shot Learning**: Include examples")
+                
+                for rec in recommendations[:4]:
+                    st.markdown(f"• {rec}")
+            
+            with col3:
+                st.markdown("### Complexity & Cost Analysis")
+                
+                # Token and cost estimation for each provider
+                for provider in ["OpenAI", "Anthropic", "Google"]:
                     tokens = metrics['estimated_tokens']
                     cost = (tokens / 1000) * MODELS[provider]["pricing"]["input"]
                     
                     st.markdown(f"**{provider}**")
-                    st.markdown(f" Tokens: ~{tokens}")
-                    st.markdown(f" Cost: ${cost:.5f}")
+                    st.markdown(f"• Tokens: ~{tokens}")
+                    st.markdown(f"• Est. Cost: ${cost:.5f}")
                     st.markdown("---")
-            
-            with col3:
-                st.markdown("### Optimization Suggestions")
-                
-                suggestions = []
-                if metrics['clarity_score'] < 70:
-                    suggestions.append("?? Simplify sentence structure")
-                if "?" not in prompt_input and "question" not in prompt_input.lower():
-                    suggestions.append("? Consider framing as a clear question")
-                if metrics['word_count'] > 500:
-                    suggestions.append("?? Consider breaking into sub-tasks")
-                if not any(keyword in prompt_input.lower() for keyword in ['please', 'provide', 'create', 'generate', 'write']):
-                    suggestions.append("?? Add clear action verbs")
-                
-                if suggestions:
-                    for suggestion in suggestions:
-                        st.info(suggestion)
-                else:
-                    st.success("? Prompt structure looks good!")
-            
-            # Advanced analysis
-            st.divider()
-            st.subheader("?? Advanced Analysis")
-            
-            # Complexity analysis
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### Keyword Density")
-                words = prompt_input.lower().split()
-                word_freq = {}
-                for word in words:
-                    if len(word) > 4:  # Only significant words
-                        word_freq[word] = word_freq.get(word, 0) + 1
-                
-                if word_freq:
-                    sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5]
-                    df = pd.DataFrame(sorted_words, columns=['Keyword', 'Frequency'])
-                    st.dataframe(df, use_container_width=True)
-            
-            with col2:
-                st.markdown("### Readability Metrics")
-                
-                # Flesch Reading Ease approximation
-                syllables_per_word = metrics['avg_word_length'] / 3  # Rough estimate
-                words_per_sentence = metrics['word_count'] / max(metrics['sentence_count'], 1)
-                
-                flesch_score = 206.835 - 1.015 * words_per_sentence - 84.6 * syllables_per_word
-                flesch_score = max(0, min(100, flesch_score))
-                
-                st.metric("Readability Score", f"{flesch_score:.1f}/100")
-                
-                if flesch_score > 60:
-                    st.success("Easy to read")
-                elif flesch_score > 30:
-                    st.warning("Moderate difficulty")
-                else:
-                    st.error("Difficult to read")
-        else:
-            st.info("Enter a prompt in the Optimize tab to see detailed analysis")
     
     with tab4:
-        st.header("?? Provider Comparison")
+        st.header("🔄 Provider Comparison")
         
         if st.session_state.optimized_prompts:
-            # Side-by-side comparison
-            cols = st.columns(len(st.session_state.optimized_prompts))
-            
-            for i, (provider, optimized) in enumerate(st.session_state.optimized_prompts.items()):
-                with cols[i]:
-                    st.markdown(f"### {provider}")
-                    
-                    # Mini metrics
-                    metrics = calculate_metrics(optimized)
-                    st.metric("Tokens", metrics['estimated_tokens'])
-                    
-                    cost = (metrics['estimated_tokens'] / 1000) * MODELS[provider]["pricing"]["input"]
-                    st.metric("Est. Cost", f"${cost:.5f}")
-                    
-                    # Strengths for this use case
-                    st.markdown("**Best for:**")
-                    for strength in MODELS[provider]["strengths"][:2]:
-                        st.markdown(f" {strength}")
-                    
-                    # Show optimized prompt
-                    with st.expander("View Prompt"):
-                        st.text(optimized[:500] + "..." if len(optimized) > 500 else optimized)
-            
-            # Comparison chart
-            st.divider()
-            st.subheader("?? Cost-Benefit Analysis")
-            
-            # Create comparison dataframe
+            # Comparison metrics
             comparison_data = []
-            for provider in st.session_state.optimized_prompts.keys():
-                metrics = calculate_metrics(st.session_state.optimized_prompts[provider])
+            
+            for provider, optimized in st.session_state.optimized_prompts.items():
+                metrics = calculate_metrics(optimized)
+                techniques = st.session_state.applied_techniques.get(provider, [])
+                
                 comparison_data.append({
                     "Provider": provider,
-                    "Tokens": metrics['estimated_tokens'],
-                    "Cost ($)": (metrics['estimated_tokens'] / 1000) * MODELS[provider]["pricing"]["input"],
-                    "Max Context": MODELS[provider]["max_tokens"],
-                    "Clarity Score": metrics['clarity_score']
+                    "Original Length": len(prompt_input),
+                    "Optimized Length": len(optimized),
+                    "Improvement Factor": f"{(len(optimized) / len(prompt_input)):.1f}x",
+                    "Techniques Applied": len(techniques),
+                    "Est. Tokens": metrics['estimated_tokens'],
+                    "Est. Cost": f"${(metrics['estimated_tokens'] / 1000) * MODELS[provider]['pricing']['input']:.5f}"
                 })
             
             df = pd.DataFrame(comparison_data)
             st.dataframe(df, use_container_width=True)
             
-            # Recommendation
-            best_value = df.loc[df['Cost ($)'].idxmin()]
-            best_clarity = df.loc[df['Clarity Score'].idxmax()]
+            # Visual comparison
+            st.subheader("Optimization Techniques by Provider")
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.success(f"?? Best Value: **{best_value['Provider']}** (${best_value['Cost ($)']:.5f})")
-            with col2:
-                st.success(f"? Best Clarity: **{best_clarity['Provider']}** ({best_clarity['Clarity Score']:.1f}%)")
+            cols = st.columns(len(st.session_state.optimized_prompts))
+            for i, (provider, techniques) in enumerate(st.session_state.applied_techniques.items()):
+                with cols[i]:
+                    st.markdown(f"### {provider}")
+                    for tech in techniques:
+                        st.markdown(f"✓ {tech}")
         else:
-            st.info("Optimize a prompt first to see provider comparisons")
+            st.info("Optimize a prompt first to see comparisons")
     
     with tab5:
-        st.header("?? Prompt History")
+        st.header("📈 Prompt History")
         
         if st.session_state.prompt_history:
-            # History controls
-            col1, col2, col3 = st.columns([2, 1, 1])
-            
-            with col1:
-                search_term = st.text_input("?? Search history", placeholder="Search prompts...")
-            
-            with col2:
-                if st.button("Clear History"):
-                    st.session_state.prompt_history = []
-                    st.rerun()
-            
-            with col3:
-                if st.button("Export History"):
-                    # Create JSON export
-                    history_json = json.dumps(
-                        [
-                            {
-                                "timestamp": item["timestamp"].isoformat(),
-                                "original": item["original"],
-                                "optimized": item["optimized"],
-                                "metrics": item["metrics"]
-                            }
-                            for item in st.session_state.prompt_history
-                        ],
-                        indent=2
-                    )
-                    st.download_button(
-                        label="Download JSON",
-                        data=history_json,
-                        file_name=f"prompt_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        mime="application/json"
-                    )
-            
             # Display history
-            filtered_history = st.session_state.prompt_history
-            if search_term:
-                filtered_history = [
-                    item for item in filtered_history
-                    if search_term.lower() in item["original"].lower()
-                ]
-            
-            for i, item in enumerate(reversed(filtered_history[-10:])):  # Show last 10
+            for i, item in enumerate(reversed(st.session_state.prompt_history[-10:])):
                 with st.expander(
-                    f"?? {item['timestamp'].strftime('%Y-%m-%d %H:%M')} - "
-                    f"{item['original'][:50]}...",
+                    f"📝 {item['timestamp'].strftime('%Y-%m-%d %H:%M')} - {item['original'][:50]}...",
                     expanded=False
                 ):
-                    col1, col2 = st.columns([3, 1])
+                    st.markdown("**Original Prompt:**")
+                    st.text(item['original'])
                     
-                    with col1:
-                        st.markdown("**Original Prompt:**")
-                        st.text(item['original'])
-                        
-                        st.markdown("**Optimized Versions:**")
-                        for provider, optimized in item['optimized'].items():
-                            st.markdown(f"*{provider}:*")
-                            st.text(optimized[:200] + "..." if len(optimized) > 200 else optimized)
+                    st.markdown("**Applied Techniques:**")
+                    for provider, techs in item.get('techniques', {}).items():
+                        st.markdown(f"*{provider}:* {', '.join(techs)}")
                     
-                    with col2:
-                        st.markdown("**Metrics:**")
-                        for key, value in item['metrics'].items():
-                            st.markdown(f" {key}: {value}")
-                        
-                        if st.button(f"Reuse", key=f"reuse_{i}"):
-                            st.session_state.current_prompt = item['original']
-                            st.session_state.optimized_prompts = item['optimized']
-                            st.success("Prompt loaded!")
-                            st.rerun()
+                    if st.button(f"Reuse This Prompt", key=f"reuse_{i}"):
+                        st.session_state.current_prompt = item['original']
+                        st.session_state.optimized_prompts = item['optimized']
+                        st.success("Prompt loaded!")
+                        st.rerun()
         else:
             st.info("No prompt history yet. Start optimizing prompts to build your history!")
-    
-    # Footer
-    st.divider()
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown("?? **Tip:** Use XML tags for Claude, JSON for GPT models")
-    with col2:
-        st.markdown("?? **Stats:** Optimized {0} prompts today".format(len(st.session_state.prompt_history)))
-    with col3:
-        st.markdown("?? **Version:** 1.0.0 | Updated: 2024")
 
 if __name__ == "__main__":
     main()
